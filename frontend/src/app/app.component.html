@@ -1,0 +1,162 @@
+<div class="page">
+  <header>
+    <h1>管网隔离方案培训演示</h1>
+    <p class="sub">
+      Angular + Cytoscape.js 拓扑 ｜ FastAPI + NetworkX 候选隔离集合 ｜
+      PostgreSQL 连接与阀门状态
+    </p>
+    <div class="disclaimer">
+      仅针对给定拓扑与阀门模型做工艺培训演示，<b>不连接真实控制系统</b>，
+      计算结果不代表真实检修已满足安全隔离条件。
+    </div>
+  </header>
+
+  @if (error()) {
+    <div class="error">{{ error() }}</div>
+  }
+
+  <div class="layout">
+    <!-- 左：控制与阀门锁定 -->
+    <aside class="panel">
+      <h2>目标设备与样例</h2>
+      <p class="hint">
+        待隔离目标：<b>{{ targetId() }}（目标设备T）</b>
+      </p>
+      <div class="btns">
+        <button class="primary" [disabled]="loading()" (click)="compute()">
+          {{ loading() ? '计算中…' : '重新计算隔离方案' }}
+        </button>
+        <button (click)="loadSample(1)">样例1 旁路绕回</button>
+        <button (click)="loadSample(2)">样例2 锁定入口阀</button>
+        <button (click)="loadSample(3)">样例3 锁定出口阀</button>
+        <button class="ghost" (click)="resetAll()">全部重置</button>
+      </div>
+
+      <h2>阀门锁定（禁止操作）</h2>
+      <p class="hint">勾选后该阀门保持当前状态、不参与候选关闭集合。</p>
+      <ul class="valves">
+        @for (v of topology()?.valves; track v.id) {
+          <li [class.bypass]="v.is_bypass">
+            <label>
+              <input
+                type="checkbox"
+                [checked]="locks()[v.id]"
+                (change)="toggleLock(v.id, !locks()[v.id])"
+              />
+              <span class="vid">{{ v.id }}</span>
+              <span class="vname">{{ v.name }}</span>
+              @if (v.is_bypass) {
+                <em>旁路</em>
+              }
+            </label>
+          </li>
+        }
+      </ul>
+    </aside>
+
+    <!-- 中：拓扑图 -->
+    <main class="panel graph-panel">
+      <h2>管网拓扑（箭头=介质名义方向，紫虚线=旁路，★=必要供给点）</h2>
+      <app-network-graph [topology]="topology()" [result]="result()" />
+      <div class="legend">
+        <span><i class="sw close"></i> 候选关闭阀</span>
+        <span><i class="sw supply"></i> 方案后供给路径</span>
+        <span><i class="sw residual"></i> 残余连通路径</span>
+        <span><i class="sw witness"></i> 经锁定阀的见证路径</span>
+      </div>
+    </main>
+
+    <!-- 右：结果 -->
+    <aside class="panel result-panel">
+      <h2>计算结果</h2>
+
+      @if (!result()) {
+        <p class="hint">点击“重新计算”或选择样例开始。</p>
+      }
+
+      @if (result(); as r) {
+        @if (r.feasible) {
+          <div class="ok">✓ 找到可行隔离集合（枚举 {{ r.examined_combinations }} 组）</div>
+          <h3>推荐方案：关闭以下 {{ r.best_solution.length }} 只阀门</h3>
+          <ul class="close-list">
+            @for (vid of r.best_solution; track vid) {
+              <li><b>{{ vid }}</b> {{ valveName(vid) }}</li>
+            }
+          </ul>
+
+          <h3>必要供给点仍可达</h3>
+          @for (sol of r.solutions.slice(0, 1); track sol.alternative_rank) {
+            @for (p of r.essentials; track p) {
+              <div class="supply">
+                ★ <b>{{ p }}</b> 来源路径：
+                <code>{{ sol.supply_paths[p]?.join(' → ') || '—' }}</code>
+              </div>
+            }
+          }
+
+          @if (r.solutions.length > 1) {
+            <h3>等价最小方案（{{ r.solutions.length }} 个）</h3>
+            <ul class="alts">
+              @for (s of r.solutions; track s.alternative_rank) {
+                <li>
+                  方案{{ s.alternative_rank + 1 }}：{{ s.close_valves.join('、') }}
+                  @if (s.closes_bypass_valves.length) {
+                    <em>（切断旁路 {{ s.closes_bypass_valves.join('、') }}，经环网供 P2）</em>
+                  }
+                </li>
+              }
+            </ul>
+          }
+        } @else {
+          <div class="bad">✗ 当前锁定下找不到可行方案</div>
+          <p class="reason">{{ r.infeasible_reason }}</p>
+
+          <h3>仍然连通的一条残余路径</h3>
+          @if (r.residual_path; as rp) {
+            <div class="path residual-p">
+              <code>{{ rp.nodes.join(' → ') }}</code>
+              <div class="meta">
+                经过阀门：{{ formatValves(rp.valves) }}
+              </div>
+              <div class="meta" [class.bypass-line]="rp.uses_bypass">
+                {{ rp.uses_bypass ? '该残余路径经由旁路。' : '' }}
+                {{
+                  rp.locked_valves_on_path.length
+                    ? '含锁定阀：' + rp.locked_valves_on_path.join('、')
+                    : '（最短残余路径未直接经过锁定阀）'
+                }}
+              </div>
+            </div>
+          }
+
+          @if (r.locked_witness_path; as wp) {
+            <h3>经锁定阀的见证路径</h3>
+            <div class="path witness-p">
+              <code>{{ wp.nodes.join(' → ') }}</code>
+              <div class="meta">
+                锁定阀：{{ wp.locked_valves_on_path.join('、') }} 无法关闭，介质仍可回到
+                {{ r.target_id }}
+              </div>
+            </div>
+          }
+
+          @if (r.unconstrained_best; as ub) {
+            <h3>切得掉目标但不可接受的最小切法</h3>
+            <p class="hint">
+              关闭 {{ joinIds(ub.close_valves) }}（{{ ub.size }} 只）即可切断目标，
+              但会断供：<b>{{ joinIds(ub.disconnects_essentials) }}</b
+              >。其中
+              <b>{{ joinIds(ub.unavoidable_essentials) }}</b>
+              在任何切法下都无法同时保住，因此不存在合格方案；其余必要供给点该切法仍可保住。
+            </p>
+          }
+        }
+      }
+    </aside>
+  </div>
+
+  <footer>
+    演示拓扑：来源 SRC — N1 — N2 — 设备T — N3；N2-BP-N3 旁路与 T 并联；
+    N1-N5-N3 环网联络；P1/P2 为不应断供支路。
+  </footer>
+</div>
