@@ -61,6 +61,11 @@ def seed_database(db: Session) -> None:
 
 
 def reset_database(db: Session) -> None:
-    """恢复演示初始状态：全部阀门打开、未锁定。"""
+    """恢复演示初始状态：全部阀门打开、未锁定，并清空许可/方案演练记录。"""
+    from .models import BypassPermit, IsolationPlan, PermitEvent
+
     db.query(Valve).update({Valve.locked: False, Valve.is_open: True, Valve.operable: True})
+    db.query(PermitEvent).delete()
+    db.query(IsolationPlan).delete()
+    db.query(BypassPermit).delete()
     db.commit()

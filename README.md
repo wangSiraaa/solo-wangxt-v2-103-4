@@ -67,15 +67,43 @@ cd frontend && npm ci && npx ng build && cd ..
 docker compose up --build
 ```
 
+## 临时旁路许可（演练）
+
+演练中可为指定维护窗口临时启用停用的旁路以维持供给。许可是纯模拟层授权，
+**不改动任何阀门真实状态、不输出真实控制指令**。
+
+- **许可内容**：适用拓扑快照（哈希）、旁路/阀门、开始/结束时刻、目的、
+  前置锁定状态、状态机 `草稿 → 已生效 → 已过期/已撤销`。
+- **生效条件**：隔离计算只在许可 `已生效` 且拓扑/锁阀条件与快照匹配时，
+  才把许可旁路阀视为临时投用（且不可被方案切断）纳入可用路径。
+- **激活校验**：激活前重新校验窗口、同旁路重叠许可、拓扑/前置锁定一致性、
+  锁阀限制（许可阀不得被锁定），并预演“应用许可后目标确实可隔离且必要供给点仍可达”。
+- **失效联动**：时限到达（过期时刻恒为窗口结束）、拓扑/锁阀变化或许可被撤销后，
+  关联方案转为 `待复核/已过期`，不会静默沿用旧计算；方案快照（含旧路径）原样保留，
+  并提供重新计算入口生成新方案。
+- **确定性**：同一旁路重叠窗口的创建会被拒绝；重复激活/撤销幂等；事件顺序以服务器
+  追加序号为准，乱序/迟到的模拟时钟事件不会重排历史；审计事件哈希链可校验篡改。
+
+典型演练：停用 `V_BP_IN/V_BP_OUT`（旁路）与 `V_LK2`（环网）后，无许可时隔离 T
+必然断供 P2（无可行方案）；创建并激活窗口许可后，关 `V_TIN`+`V_TOUT` 即可隔离 T，
+P2 经许可旁路 `N2→BP→N3` 保供。
+
 ## API 摘要
 
 - `GET /api/topology`：节点 / 有向管段 / 阀门（含 `is_open`、`locked`、`is_bypass`）
-- `POST /api/isolation`：body `{ "target_id": "T", "locks": {"V_TIN": true} }`
+- `POST /api/isolation`：body `{ "target_id": "T", "locks": {"V_TIN": true}, "permit_id": null, "at": null }`
   - 可行：`best_solution`（最少阀门）、等价方案、方案后每个必要供给点的来源路径
   - 不可行：`residual_path`（仍连通的一条残余路径）、`locked_witness_path`（经锁定阀的见证路径）、
     `unconstrained_best.unavoidable_essentials`（任何切法都无法保住的供给点）
+  - 每次计算持久化为方案记录（返回 `plan_id`），响应附培训模拟 `disclaimer`
 - `POST /api/valves/{valve_id}/lock`：持久化单只阀门锁定状态
-- `POST /api/reset`：全部阀门恢复打开、未锁定
+- `POST /api/valves/{valve_id}/state`：设置阀门开闭（投用/停用，模拟检修退出运行）
+- `POST /api/permits`：创建许可（草稿）；同旁路重叠窗口返回 409
+- `POST /api/permits/{id}/activate` / `revoke`：激活 / 撤销（幂等；冲突 409 并记录审计事件）
+- `GET /api/permits` / `/{id}` / `/{id}/history`：许可状态、条件匹配结果与哈希链审计历史
+- `GET /api/plans` / `/{id}`：方案记录（读取时惰性复核状态）；`POST /api/plans/{id}/recompute`：按当前条件重算
+- `POST /api/reset`：全部阀门恢复打开、未锁定，并清空许可/方案演练记录
+- 许可/方案接口均接受可选 `at`（ISO 时刻）作为演练模拟时钟，缺省为服务器当前时间
 
 ## 安全边界声明
 

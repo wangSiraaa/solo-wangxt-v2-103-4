@@ -275,3 +275,184 @@ footer {
   padding: 8px 12px;
   border-radius: 8px;
 }
+
+/* ---------------- 临时旁路许可 ---------------- */
+
+.permit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px 0;
+}
+
+.permit-form label,
+.sim-clock {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: #475569;
+}
+
+.permit-form input,
+.sim-clock input,
+.permit-select {
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 5px 7px;
+  font-size: 12px;
+  width: 100%;
+}
+
+.sim-clock {
+  margin: 8px 0;
+}
+
+.permits,
+.plans {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 420px;
+  overflow: auto;
+}
+
+.permit,
+.plan {
+  border: 1px solid #e2e8f0;
+  border-left-width: 4px;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.permit.st-draft { border-left-color: #94a3b8; }
+.permit.st-active { border-left-color: #16a34a; }
+.permit.st-expired { border-left-color: #f59e0b; }
+.permit.st-revoked { border-left-color: #ef4444; }
+.plan.ps-valid { border-left-color: #16a34a; }
+.plan.ps-stale { border-left-color: #f59e0b; }
+.plan.ps-expired { border-left-color: #94a3b8; }
+
+.permit-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+
+.badge {
+  font-size: 11px;
+  border-radius: 4px;
+  padding: 0 6px;
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.st-active .badge,
+.ps-valid .badge {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.st-expired .badge,
+.ps-stale .badge,
+.badge.warn {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.st-revoked .badge {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.ps-expired .badge {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.permit-badge {
+  background: #ede9fe;
+  color: #6d28d9;
+}
+
+.permit-btns {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.permit-btns button {
+  padding: 3px 10px;
+  font-size: 12px;
+}
+
+.history {
+  margin-top: 6px;
+  border-top: 1px dashed #e2e8f0;
+  padding-top: 4px;
+}
+
+.history ol {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+
+.history li {
+  margin: 4px 0;
+}
+
+.history .seq {
+  font-family: monospace;
+  color: #64748b;
+}
+
+.permit-banner {
+  background: #ecfdf5;
+  border: 1px solid #6ee7b7;
+  color: #065f46;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.permit-supply {
+  font-size: 12px;
+  color: #6d28d9;
+  background: #f5f3ff;
+  border: 1px solid #c4b5fd;
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin: 6px 0;
+}
+
+.snapshot-banner {
+  background: #eff6ff;
+  border: 1px solid #93c5fd;
+  color: #1e40af;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  margin-bottom: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.snapshot-banner button {
+  padding: 2px 10px;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.sw.permit {
+  background: #4ade80;
+  height: 0;
+  border-top: 3px dashed #4ade80;
+}

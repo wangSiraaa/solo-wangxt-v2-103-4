@@ -3,11 +3,13 @@
     <h1>管网隔离方案培训演示</h1>
     <p class="sub">
       Angular + Cytoscape.js 拓扑 ｜ FastAPI + NetworkX 候选隔离集合 ｜
-      PostgreSQL 连接与阀门状态
+      PostgreSQL 连接与阀门状态 ｜ 临时旁路许可（演练）
     </p>
     <div class="disclaimer">
       仅针对给定拓扑与阀门模型做工艺培训演示，<b>不连接真实控制系统</b>，
-      计算结果不代表真实检修已满足安全隔离条件。
+      计算结果不代表真实检修已满足安全隔离条件。临时旁路许可与关联方案同样仅为
+      培训模拟：<b>不输出任何真实控制指令</b>，许可到期、撤销或拓扑/锁阀条件变化后，
+      旧方案不得作为真实检修隔离依据。
     </div>
   </header>
 
@@ -52,6 +54,90 @@
           </li>
         }
       </ul>
+
+      <h2>阀门投用模拟</h2>
+      <p class="hint">取消勾选=停用该阀（模拟检修退出运行）；许可演练通常先停用旁路与环网联络阀。</p>
+      <ul class="valves">
+        @for (v of topology()?.valves; track v.id) {
+          <li [class.bypass]="v.is_bypass">
+            <label>
+              <input
+                type="checkbox"
+                [checked]="v.is_open"
+                (change)="toggleValveState(v.id, !v.is_open)"
+              />
+              <span class="vid">{{ v.id }}</span>
+              <span class="vname">{{ v.is_open ? '投用' : '停用' }}</span>
+              @if (v.is_bypass) {
+                <em>旁路</em>
+              }
+            </label>
+          </li>
+        }
+      </ul>
+
+      <h2>临时旁路许可（演练）</h2>
+      <p class="hint">
+        为指定维护窗口临时启用旁路 <b>V_BP_IN / V_BP_OUT</b> 以维持供给。
+        许可仅在<b>已生效且条件匹配</b>时被隔离计算纳入可用路径；它不改变任何真实阀门状态。
+      </p>
+      <div class="permit-form">
+        <label>目的<input type="text" [(ngModel)]="permitPurpose" /></label>
+        <label>开始<input type="datetime-local" [(ngModel)]="permitStart" /></label>
+        <label>结束<input type="datetime-local" [(ngModel)]="permitEnd" /></label>
+        <button (click)="createPermit()">创建许可（草稿）</button>
+      </div>
+      <label class="sim-clock">
+        演练模拟时钟（留空=服务器当前时间）
+        <input type="datetime-local" [(ngModel)]="simClock" (change)="refreshPermitsAndPlans()" />
+      </label>
+
+      <ul class="permits">
+        @for (p of permits(); track p.id) {
+          <li [class]="'permit st-' + p.status">
+            <div class="permit-head">
+              <b>#{{ p.id }}</b>
+              <span class="badge">{{ permitStatusText(p.status) }}</span>
+              @if (!p.conditions_match && p.status !== 'expired' && p.status !== 'revoked') {
+                <span class="badge warn" title="{{ p.condition_mismatches.join('；') }}">条件失配</span>
+              }
+            </div>
+            <div class="meta">{{ p.purpose || '（未填写目的）' }}</div>
+            <div class="meta">窗口：{{ fmtTime(p.start_at) }} ~ {{ fmtTime(p.end_at) }}</div>
+            <div class="meta">旁路阀：{{ joinIds(p.valve_ids) }}</div>
+            <div class="permit-btns">
+              @if (p.status === 'draft') {
+                <button (click)="activatePermit(p.id)">激活</button>
+              }
+              @if (p.status === 'draft' || p.status === 'active') {
+                <button (click)="revokePermit(p.id)">撤销</button>
+              }
+              <button (click)="showHistory(p.id)">
+                {{ historyOpenFor(p.id) ? '收起历史' : '历史' }}
+              </button>
+            </div>
+            @if (historyOpenFor(p.id)) {
+              @if (history(); as h) {
+                <div class="history">
+                  <div class="meta">
+                    审计链校验：{{ h.chain_valid ? '✓ 完整未篡改' : '✗ 校验失败（疑似篡改）' }}
+                  </div>
+                  <ol>
+                    @for (ev of h.events; track ev.seq) {
+                      <li>
+                        <span class="seq">#{{ ev.seq }}</span> {{ eventText(ev.event_type) }}
+                        <div class="meta">业务时刻 {{ fmtTime(ev.at) }} ｜ 哈希 {{ ev.hash.slice(0, 12) }}…</div>
+                      </li>
+                    }
+                  </ol>
+                </div>
+              }
+            }
+          </li>
+        } @empty {
+          <li class="meta">暂无许可。</li>
+        }
+      </ul>
     </aside>
 
     <!-- 中：拓扑图 -->
@@ -63,18 +149,47 @@
         <span><i class="sw supply"></i> 方案后供给路径</span>
         <span><i class="sw residual"></i> 残余连通路径</span>
         <span><i class="sw witness"></i> 经锁定阀的见证路径</span>
+        <span><i class="sw permit"></i> 许可临时投用旁路</span>
       </div>
+      <h3>计算时应用的许可</h3>
+      <select
+        class="permit-select"
+        [ngModel]="selectedPermitId()"
+        (ngModelChange)="selectedPermitId.set($event)"
+      >
+        <option [ngValue]="null">不应用许可（默认）</option>
+        @for (p of activePermits(); track p.id) {
+          <option [ngValue]="p.id">#{{ p.id }} {{ p.purpose || '许可' }}（已生效）</option>
+        }
+      </select>
+      <p class="hint">仅列出已生效且条件匹配的许可；过期/撤销/失配许可不可用于计算。</p>
     </main>
 
     <!-- 右：结果 -->
     <aside class="panel result-panel">
       <h2>计算结果</h2>
 
+      @if (snapshot(); as snap) {
+        <div class="snapshot-banner">
+          正在查看历史方案 #{{ snap.id }} 快照（状态：{{ planStatusText(snap.status) }}{{
+            snap.permit_id ? '，关联许可 #' + snap.permit_id : ''
+          }}）—— 旧路径仅为当时记录，不代表当前有效方案。
+          <button (click)="snapshot.set(null)">返回</button>
+        </div>
+      }
+
       @if (!result()) {
         <p class="hint">点击“重新计算”或选择样例开始。</p>
       }
 
       @if (result(); as r) {
+        @if (r.permit; as perm) {
+          <div class="permit-banner">
+            本方案应用临时旁路许可 <b>#{{ perm.id }}</b>（{{ permitStatusText(perm.status) }}，
+            窗口 {{ fmtTime(perm.start_at) }} ~ {{ fmtTime(perm.end_at) }}），
+            旁路 {{ joinIds(perm.valve_ids) }} 临时投用且不可切断。仅为培训模拟，不输出真实控制指令。
+          </div>
+        }
         @if (r.feasible) {
           <div class="ok">✓ 找到可行隔离集合（枚举 {{ r.examined_combinations }} 组）</div>
           <h3>推荐方案：关闭以下 {{ r.best_solution.length }} 只阀门</h3>
@@ -90,6 +205,12 @@
               <div class="supply">
                 ★ <b>{{ p }}</b> 来源路径：
                 <code>{{ sol.supply_paths[p]?.join(' → ') || '—' }}</code>
+              </div>
+            }
+            @if (sol.permit_bypass_in_supply?.length) {
+              <div class="permit-supply">
+                供给路径经由许可旁路阀 {{ joinIds(sol.permit_bypass_in_supply ?? []) }}：
+                许可失效后该保供路径不再成立，方案将转为待复核/过期。
               </div>
             }
           }
@@ -152,11 +273,43 @@
           }
         }
       }
+
+      <h2>方案记录</h2>
+      <p class="hint">
+        每次计算都会留存方案快照。许可到期/撤销或拓扑、锁阀变化后，关联方案转为
+        <b>待复核/已过期</b>，不会静默沿用旧计算。
+      </p>
+      <ul class="plans">
+        @for (pl of plans(); track pl.id) {
+          <li [class]="'plan ps-' + pl.status">
+            <div class="permit-head">
+              <b>方案 #{{ pl.id }}</b>
+              <span class="badge">{{ planStatusText(pl.status) }}</span>
+              @if (pl.permit_id) {
+                <span class="badge permit-badge">许可 #{{ pl.permit_id }}</span>
+              }
+            </div>
+            <div class="meta">
+              {{ pl.feasible ? '关闭 ' + joinIds(pl.best_solution) : '无可行方案' }} ｜
+              计算于 {{ fmtTime(pl.created_at) }}
+            </div>
+            <div class="permit-btns">
+              <button (click)="viewPlan(pl.id)">查看快照</button>
+              @if (pl.status !== 'valid') {
+                <button class="primary" (click)="recomputePlan(pl.id)">重新计算</button>
+              }
+            </div>
+          </li>
+        } @empty {
+          <li class="meta">暂无方案记录。</li>
+        }
+      </ul>
     </aside>
   </div>
 
   <footer>
     演示拓扑：来源 SRC — N1 — N2 — 设备T — N3；N2-BP-N3 旁路与 T 并联；
-    N1-N5-N3 环网联络；P1/P2 为不应断供支路。
+    N1-N5-N3 环网联络；P1/P2 为不应断供支路。临时旁路许可仅为培训模拟，
+    不输出真实控制指令；许可到期、撤销或条件变化后旧方案不可作为依据。
   </footer>
 </div>

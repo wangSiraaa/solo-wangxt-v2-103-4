@@ -158,8 +158,22 @@ def _valve_view(edges: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(out, key=lambda x: x["id"])
 
 
-def compute_isolation(db: Session, target_id: str) -> dict[str, Any]:
+def compute_isolation(
+    db: Session, target_id: str, permit_valves: set[str] | None = None
+) -> dict[str, Any]:
+    """枚举候选关闭集合。
+
+    permit_valves：临时旁路许可覆盖的阀门。许可有效且条件匹配时，这些阀门
+    在求解视图中被视为临时投用（即使阀门表中记录为关闭）且不可被方案切断；
+    阀门表本身绝不被修改（不输出真实控制指令）。
+    """
     nodes, edges = _load(db)
+    permit_valves = set(permit_valves or set())
+    if permit_valves:
+        for e in edges.values():
+            if e["valve_id"] in permit_valves:
+                e["is_open"] = True          # 许可临时投用（仅求解视图）
+                e["permit_protected"] = True  # 许可期间不得切断
     node_ids = {n.id for n in nodes}
     if target_id not in node_ids:
         raise TopologyError(f"目标节点不存在: {target_id}")
@@ -175,11 +189,15 @@ def compute_isolation(db: Session, target_id: str) -> dict[str, Any]:
         if e["is_open"]:
             full_open.add_edge(e["u"], e["v"], edge_id=e["id"], valve_id=e["valve_id"])
 
-    # 可被本算法关闭的阀门 = 工艺可操作 + 当前打开 + 未锁定
+    # 可被本算法关闭的阀门 = 工艺可操作 + 当前打开 + 未锁定 + 未被许可保护
     candidates = sorted(
         e["valve_id"]
         for e in edges.values()
-        if e["valve_id"] and e["operable"] and e["is_open"] and not e["locked"]
+        if e["valve_id"]
+        and e["operable"]
+        and e["is_open"]
+        and not e["locked"]
+        and not e.get("permit_protected")
     )
 
     base_graph = build_graph(edges, set())
@@ -198,6 +216,7 @@ def compute_isolation(db: Session, target_id: str) -> dict[str, Any]:
             "locked_witness_path": None,
             "infeasible_reason": None,
             "unconstrained_best": None,
+            "permit_valves": sorted(permit_valves),
         }
 
     def valid(closed: set[str]) -> bool:
@@ -237,12 +256,27 @@ def compute_isolation(db: Session, target_id: str) -> dict[str, Any]:
             p: _preferred_source_path(g, p, sources, open_bypass_edges)
             for p in essentials
         }
+        # 供给路径实际经过的许可旁路阀（用于前端标注“本方案依赖临时许可”）
+        permit_used: set[str] = set()
+        if permit_valves:
+            pair_to_valve: dict[tuple[str, str], str | None] = {}
+            for e in edges.values():
+                pair_to_valve[(e["u"], e["v"])] = e["valve_id"]
+                pair_to_valve[(e["v"], e["u"])] = e["valve_id"]
+            for path in supply_paths.values():
+                if not path:
+                    continue
+                for a, b in zip(path, path[1:]):
+                    vid = pair_to_valve.get((a, b))
+                    if vid in permit_valves:
+                        permit_used.add(vid)
         return {
             "close_valves": sorted(closed),
             "size": len(closed),
             "alternative_rank": rank,
             "closes_bypass_valves": sorted(v for v in closed if any(e["valve_id"] == v and e["is_bypass"] for e in edges.values())),
             "supply_paths": supply_paths,
+            "permit_bypass_in_supply": sorted(permit_used),
         }
 
     result: dict[str, Any] = {
@@ -257,6 +291,7 @@ def compute_isolation(db: Session, target_id: str) -> dict[str, Any]:
         "residual_path": None,
         "infeasible_reason": None,
         "unconstrained_best": None,
+        "permit_valves": sorted(permit_valves),
     }
 
     if solutions:
