@@ -13,6 +13,9 @@
    并可返回若干等价方案。
 5. 不存在有效集合时，返回当前仍可从来源到达目标设备的一条残余路径
    以及断供/无法隔离的诊断信息。
+6. 临时旁路许可（permit_valves，纯培训模拟）：许可覆盖的旁路阀门在窗口内
+   被视为临时可用——即使当前关闭也计入连通图，且不得被选入关闭集合
+   （窗口内须保持可用以维持供给）。由许可启用的供给路径在结果中显式标注。
 """
 from __future__ import annotations
 
@@ -57,18 +60,21 @@ def _load(db: Session) -> tuple[list[Node], dict[str, dict[str, Any]]]:
     return nodes, edges
 
 
-def build_graph(edges: dict[str, dict[str, Any]], closed: set[str]) -> nx.Graph:
+def build_graph(
+    edges: dict[str, dict[str, Any]], closed: set[str], permit: set[str] | frozenset[str] = frozenset()
+) -> nx.Graph:
     """构建在给定关闭集合下的物理连通无向图。
 
-    初始即关闭、或被方案关闭的阀门对应边都不放入图；
-    锁定阀门保持其当前状态、不可被选入 closed。
+    初始即关闭（且未被许可临时启用）、或被方案关闭的阀门对应边都不放入图；
+    锁定阀门保持其当前状态、不可被选入 closed；许可（permit）覆盖的阀门
+    即使当前关闭也视为连通（临时旁路许可模拟）。
     """
     g = nx.Graph()
     for e in edges.values():
         g.add_node(e["u"])
         g.add_node(e["v"])
-        if not e["is_open"]:
-            continue  # 初始已关闭
+        if not e["is_open"] and e["valve_id"] not in permit:
+            continue  # 初始已关闭，且无许可启用
         if e["valve_id"] in closed:
             continue  # 本方案关闭
         g.add_edge(e["u"], e["v"], edge_id=e["id"], valve_id=e["valve_id"])
@@ -135,7 +141,7 @@ def _path_valves(g_or_edges: nx.Graph | dict, path: list[str]) -> list[str]:
     return [pair_to_valve[(a, b)] for a, b in zip(path, path[1:]) if (a, b) in pair_to_valve]
 
 
-def _valve_view(edges: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+def _valve_view(edges: dict[str, dict[str, Any]], permit: set[str] | frozenset[str] = frozenset()) -> list[dict[str, Any]]:
     seen: set[str] = set()
     out: list[dict[str, Any]] = []
     for e in edges.values():
@@ -153,12 +159,16 @@ def _valve_view(edges: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
                 "locked": e["locked"],
                 "operable": e["operable"],
                 "is_bypass": e["is_bypass"],
+                "permit_enabled": vid in permit,
             }
         )
     return sorted(out, key=lambda x: x["id"])
 
 
-def compute_isolation(db: Session, target_id: str) -> dict[str, Any]:
+def compute_isolation(
+    db: Session, target_id: str, permit_valves: set[str] | frozenset[str] | None = None
+) -> dict[str, Any]:
+    permit_set = frozenset(permit_valves or ())
     nodes, edges = _load(db)
     node_ids = {n.id for n in nodes}
     if target_id not in node_ids:
@@ -172,17 +182,22 @@ def compute_isolation(db: Session, target_id: str) -> dict[str, Any]:
     full_open = nx.Graph()
     full_open.add_nodes_from(node_ids)
     for e in edges.values():
-        if e["is_open"]:
+        if e["is_open"] or e["valve_id"] in permit_set:
             full_open.add_edge(e["u"], e["v"], edge_id=e["id"], valve_id=e["valve_id"])
 
-    # 可被本算法关闭的阀门 = 工艺可操作 + 当前打开 + 未锁定
+    # 可被本算法关闭的阀门 = 工艺可操作 + 当前打开 + 未锁定 + 未被许可占用
+    # （许可覆盖的旁路阀门在窗口内须保持可用，不参与候选关闭集合）
     candidates = sorted(
         e["valve_id"]
         for e in edges.values()
-        if e["valve_id"] and e["operable"] and e["is_open"] and not e["locked"]
+        if e["valve_id"]
+        and e["operable"]
+        and e["is_open"]
+        and not e["locked"]
+        and e["valve_id"] not in permit_set
     )
 
-    base_graph = build_graph(edges, set())
+    base_graph = build_graph(edges, set(), permit_set)
 
     # 初始状态下目标已无来源路径：无需操作
     if not _reachable_sources(base_graph, target_id, sources):
@@ -191,8 +206,20 @@ def compute_isolation(db: Session, target_id: str) -> dict[str, Any]:
             "target_id": target_id,
             "sources": sources,
             "essentials": essentials,
-            "candidate_valves": _valve_view(edges),
-            "solutions": [{"close_valves": [], "size": 0, "alternative_rank": 0}],
+            "candidate_valves": _valve_view(edges, permit_set),
+            "permit_valves": sorted(permit_set),
+            "solutions": [
+                {
+                    "close_valves": [],
+                    "size": 0,
+                    "alternative_rank": 0,
+                    "closes_bypass_valves": [],
+                    "supply_paths": {},
+                    "uses_permit": False,
+                    "permit_valves_used": [],
+                    "supply_uses_permit": {},
+                }
+            ],
             "best_solution": [],
             "residual_path": None,
             "locked_witness_path": None,
@@ -201,7 +228,7 @@ def compute_isolation(db: Session, target_id: str) -> dict[str, Any]:
         }
 
     def valid(closed: set[str]) -> bool:
-        g = build_graph(edges, closed)
+        g = build_graph(edges, closed, permit_set)
         if _reachable_sources(g, target_id, sources):
             return False
         for p in essentials:
@@ -227,22 +254,40 @@ def compute_isolation(db: Session, target_id: str) -> dict[str, Any]:
             break
 
     def enrich(closed: set[str], rank: int) -> dict[str, Any]:
-        g = build_graph(edges, closed)
+        g = build_graph(edges, closed, permit_set)
         open_bypass_edges: set[tuple[str, str]] = {
             (e["u"], e["v"])
             for e in edges.values()
-            if e["is_bypass"] and e["valve_id"] not in closed and e["is_open"]
+            if e["is_bypass"]
+            and e["valve_id"] not in closed
+            and (e["is_open"] or e["valve_id"] in permit_set)
         }
         supply_paths = {
             p: _preferred_source_path(g, p, sources, open_bypass_edges)
             for p in essentials
         }
+        # 标注哪些供给路径实际经过了许可临时启用的旁路阀门
+        supply_uses_permit: dict[str, bool] = {}
+        permit_used: set[str] = set()
+        for p, path in supply_paths.items():
+            uses = False
+            if path:
+                for a, b in zip(path, path[1:]):
+                    data = g.get_edge_data(a, b)
+                    vid = data.get("valve_id") if data else None
+                    if vid in permit_set:
+                        uses = True
+                        permit_used.add(vid)
+            supply_uses_permit[p] = uses
         return {
             "close_valves": sorted(closed),
             "size": len(closed),
             "alternative_rank": rank,
             "closes_bypass_valves": sorted(v for v in closed if any(e["valve_id"] == v and e["is_bypass"] for e in edges.values())),
             "supply_paths": supply_paths,
+            "uses_permit": any(supply_uses_permit.values()),
+            "permit_valves_used": sorted(permit_used),
+            "supply_uses_permit": supply_uses_permit,
         }
 
     result: dict[str, Any] = {
@@ -250,7 +295,8 @@ def compute_isolation(db: Session, target_id: str) -> dict[str, Any]:
         "target_id": target_id,
         "sources": sources,
         "essentials": essentials,
-        "candidate_valves": _valve_view(edges),
+        "candidate_valves": _valve_view(edges, permit_set),
+        "permit_valves": sorted(permit_set),
         "examined_combinations": examined,
         "solutions": [],
         "best_solution": [],
@@ -279,7 +325,7 @@ def compute_isolation(db: Session, target_id: str) -> dict[str, Any]:
             if examined2 > MAX_ENUMERATE:
                 stop = True
                 break
-            g = build_graph(edges, set(combo))
+            g = build_graph(edges, set(combo), permit_set)
             if not _reachable_sources(g, target_id, sources):
                 all_cuts.append(set(combo))
         if stop:
@@ -292,7 +338,7 @@ def compute_isolation(db: Session, target_id: str) -> dict[str, Any]:
         essential_set = set(essentials)
         cuts_with_lost: list[tuple[set[str], set[str]]] = []
         for cut in all_cuts:
-            g = build_graph(edges, cut)
+            g = build_graph(edges, cut, permit_set)
             cut_p = {p for p in essentials if not _reachable_sources(g, p, sources)}
             for p in essential_set - cut_p:
                 ever_supplied.add(p)

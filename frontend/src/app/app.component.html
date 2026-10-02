@@ -3,11 +3,12 @@
     <h1>管网隔离方案培训演示</h1>
     <p class="sub">
       Angular + Cytoscape.js 拓扑 ｜ FastAPI + NetworkX 候选隔离集合 ｜
-      PostgreSQL 连接与阀门状态
+      PostgreSQL 连接与阀门状态 ｜ 临时旁路许可（模拟）
     </p>
     <div class="disclaimer">
       仅针对给定拓扑与阀门模型做工艺培训演示，<b>不连接真实控制系统</b>，
-      计算结果不代表真实检修已满足安全隔离条件。
+      计算结果不代表真实检修已满足安全隔离条件。临时旁路许可、演示时钟与关联方案
+      同为模拟数据，<b>不输出任何真实控制指令</b>。
     </div>
   </header>
 
@@ -48,6 +49,9 @@
               @if (v.is_bypass) {
                 <em>旁路</em>
               }
+              @if (permitEnabledValves().has(v.id)) {
+                <em class="permit-tag">许可</em>
+              }
             </label>
           </li>
         }
@@ -57,10 +61,11 @@
     <!-- 中：拓扑图 -->
     <main class="panel graph-panel">
       <h2>管网拓扑（箭头=介质名义方向，紫虚线=旁路，★=必要供给点）</h2>
-      <app-network-graph [topology]="topology()" [result]="result()" />
+      <app-network-graph [topology]="topology()" [result]="displayResult()" />
       <div class="legend">
         <span><i class="sw close"></i> 候选关闭阀</span>
         <span><i class="sw supply"></i> 方案后供给路径</span>
+        <span><i class="sw permit"></i> 许可启用旁路（模拟）</span>
         <span><i class="sw residual"></i> 残余连通路径</span>
         <span><i class="sw witness"></i> 经锁定阀的见证路径</span>
       </div>
@@ -70,11 +75,30 @@
     <aside class="panel result-panel">
       <h2>计算结果</h2>
 
-      @if (!result()) {
+      @if (viewingPlan(); as vp) {
+        <div class="snapshot-banner">
+          <b>历史方案快照 #{{ vp.id }}</b>（{{ planStatusLabel[vp.status] }}，计算于
+          {{ fmtTime(vp.created_at) }}）——不代表当前管网状态，不得作为操作依据。
+          <button class="ghost" (click)="backToCurrent()">返回当前</button>
+        </div>
+      }
+
+      @if (!displayResult()) {
         <p class="hint">点击“重新计算”或选择样例开始。</p>
       }
 
-      @if (result(); as r) {
+      @if (displayResult(); as r) {
+        @if (r.applied_permits.length) {
+          <div class="permit-banner">
+            本方案应用临时旁路许可
+            @for (ap of r.applied_permits; track ap.id) {
+              <b>#{{ ap.id }}</b>{{ ap.purpose ? '（' + ap.purpose + '）' : '' }}
+            }
+            ，许可启用旁路阀：{{ joinIds(r.permit_valves) }}。
+            纯培训模拟，不输出真实控制指令。
+          </div>
+        }
+
         @if (r.feasible) {
           <div class="ok">✓ 找到可行隔离集合（枚举 {{ r.examined_combinations }} 组）</div>
           <h3>推荐方案：关闭以下 {{ r.best_solution.length }} 只阀门</h3>
@@ -90,6 +114,9 @@
               <div class="supply">
                 ★ <b>{{ p }}</b> 来源路径：
                 <code>{{ sol.supply_paths[p]?.join(' → ') || '—' }}</code>
+                @if (sol.supply_uses_permit?.[p]) {
+                  <em class="permit-tag">经许可旁路（模拟）</em>
+                }
               </div>
             }
           }
@@ -102,6 +129,9 @@
                   方案{{ s.alternative_rank + 1 }}：{{ s.close_valves.join('、') }}
                   @if (s.closes_bypass_valves.length) {
                     <em>（切断旁路 {{ s.closes_bypass_valves.join('、') }}，经环网供 P2）</em>
+                  }
+                  @if (s.uses_permit) {
+                    <em class="permit-tag">（使用许可旁路 {{ joinIds(s.permit_valves_used ?? []) }}）</em>
                   }
                 </li>
               }
@@ -153,6 +183,178 @@
         }
       }
     </aside>
+  </div>
+
+  <!-- 下：临时旁路许可 + 关联方案 -->
+  <div class="permits-grid">
+    <section class="panel">
+      <h2>临时旁路许可（培训模拟）</h2>
+      <p class="hint">
+        为指定维护窗口临时启用旁路维持供给。许可仅在有效且条件匹配时被隔离计算纳入；
+        到期、拓扑/锁阀变化或撤销后，关联方案转为待复核/已过期，不会静默沿用。
+      </p>
+
+      <div class="clock-row">
+        <span>演示时钟：<b>{{ fmtTime(clockNow()) }}</b>
+          <em class="badge" [class.badge-active]="clockSimulated()">
+            {{ clockSimulated() ? '模拟' : '真实' }}
+          </em>
+        </span>
+        <input type="datetime-local" [value]="clockInput()" (change)="onClockInput($event)" />
+        <button (click)="applyClock()">设置</button>
+        <button class="ghost" (click)="clearClock()">恢复真实时间</button>
+      </div>
+
+      <h3>新建许可（草稿）</h3>
+      <div class="form">
+        <div class="form-row">
+          <span class="form-label">旁路阀门</span>
+          @for (v of bypassValves(); track v.id) {
+            <label class="inline">
+              <input
+                type="checkbox"
+                [checked]="!!formValves()[v.id]"
+                (change)="toggleFormValve(v.id)"
+              />
+              {{ v.id }} {{ v.name }}
+            </label>
+          }
+        </div>
+        <div class="form-row">
+          <span class="form-label">窗口(UTC)</span>
+          <input type="datetime-local" [value]="formStarts()" (change)="onFormInput('starts', $event)" />
+          <span>至</span>
+          <input type="datetime-local" [value]="formEnds()" (change)="onFormInput('ends', $event)" />
+        </div>
+        <div class="form-row">
+          <span class="form-label">目的</span>
+          <input
+            type="text"
+            class="purpose"
+            placeholder="如：演练期间维持 P2 供给"
+            [value]="formPurpose()"
+            (input)="onFormInput('purpose', $event)"
+          />
+        </div>
+        <div class="form-row">
+          <button class="primary" (click)="createPermit()">创建许可（草稿）</button>
+        </div>
+      </div>
+
+      <h3>许可列表（{{ permits().length }}）</h3>
+      @if (!permits().length) {
+        <p class="hint">暂无许可。</p>
+      }
+      <ul class="permit-list">
+        @for (p of permits(); track p.id) {
+          <li>
+            <div class="permit-head">
+              <b>#{{ p.id }}</b>
+              <span class="badge" [class]="'badge badge-' + p.status">
+                {{ permitStatusLabel[p.status] }}
+              </span>
+              @if (p.status === 'active' && p.applicable_now) {
+                <span class="badge badge-applicable">当前可应用</span>
+              }
+              <span class="permit-window">{{ fmtTime(p.starts_at) }} ~ {{ fmtTime(p.ends_at) }}</span>
+            </div>
+            <div class="meta">
+              旁路：{{ joinIds(p.bypass_valve_ids) }} ｜ 目标：{{ p.target_id }}
+              {{ p.purpose ? '｜ 目的：' + p.purpose : '' }}
+              @if (p.linked_plan_ids.length) {
+                ｜ 关联方案：#{{ p.linked_plan_ids.join('、#') }}
+              }
+            </div>
+            <div class="permit-actions">
+              @if (p.status === 'draft') {
+                <button (click)="activatePermit(p)">激活</button>
+              }
+              @if (p.status === 'draft' || p.status === 'active') {
+                <button (click)="revokePermit(p)">撤销</button>
+              }
+              <button class="ghost" (click)="revalidatePermit(p)">复核</button>
+              <button class="ghost" (click)="toggleEvents(p)">
+                {{ eventsPermitId() === p.id ? '收起审计' : '审计' }}
+              </button>
+            </div>
+
+            @if (validations()[p.id]; as rep) {
+              <div class="checks">
+                @for (c of rep.checks | keyvalue; track c.key) {
+                  <span class="check" [class.check-bad]="!c.value">
+                    {{ c.value ? '✓' : '✗' }} {{ checkName(c.key) }}
+                  </span>
+                }
+              </div>
+            }
+
+            @if (eventsPermitId() === p.id) {
+              <div class="events">
+                <div class="meta">
+                  审计链（按到达顺序）：
+                  <b [class.chain-bad]="!chainValid()">
+                    {{ chainValid() ? '哈希链完整 ✓' : '哈希链校验失败 ✗（历史被篡改）' }}
+                  </b>
+                </div>
+                <table>
+                  <thead>
+                    <tr><th>#</th><th>事件</th><th>事件时钟</th><th>哈希</th></tr>
+                  </thead>
+                  <tbody>
+                    @for (ev of events(); track ev.seq) {
+                      <tr>
+                        <td>{{ ev.seq }}</td>
+                        <td>{{ eventName(ev.event_type) }}</td>
+                        <td>{{ fmtTime(ev.occurred_at) }}</td>
+                        <td class="hash">{{ ev.hash.slice(0, 10) }}…</td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            }
+          </li>
+        }
+      </ul>
+    </section>
+
+    <section class="panel">
+      <h2>关联方案（许可下持久化）</h2>
+      <p class="hint">
+        许可下计算并保存的方案快照。许可到期/撤销或拓扑、锁阀变化后，
+        方案转为<b>待复核/已过期</b>而非静默沿用；历史快照中的旧路径原样保留。
+      </p>
+      @if (!plans().length) {
+        <p class="hint">暂无持久化方案——许可生效后计算隔离方案即自动保存。</p>
+      }
+      <ul class="plan-list">
+        @for (pl of plans(); track pl.id) {
+          <li>
+            <div class="permit-head">
+              <b>方案 #{{ pl.id }}</b>
+              <span class="badge" [class]="'badge badge-plan-' + pl.status">
+                {{ planStatusLabel[pl.status] }}
+              </span>
+              <span class="permit-window">{{ fmtTime(pl.created_at) }}</span>
+            </div>
+            <div class="meta">
+              目标 {{ pl.target_id }} ｜ 关闭：{{ pl.close_valves.join('、') || '—' }} ｜
+              许可：#{{ pl.permit_ids.join('、#') }}
+            </div>
+            <div class="permit-actions">
+              <button class="ghost" (click)="viewPlan(pl)">查看快照</button>
+              @if (pl.status !== 'current') {
+                <button (click)="recompute()">重新计算</button>
+              }
+            </div>
+          </li>
+        }
+      </ul>
+      <p class="hint disclaimer-small">
+        许可与方案仅为培训模拟数据，不输出真实控制指令；任何快照不得作为真实检修
+        隔离（LOTO）的安全依据。
+      </p>
+    </section>
   </div>
 
   <footer>

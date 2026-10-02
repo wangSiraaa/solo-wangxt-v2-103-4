@@ -275,3 +275,261 @@ footer {
   padding: 8px 12px;
   border-radius: 8px;
 }
+
+/* ---------------- 临时旁路许可 ---------------- */
+
+.permits-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+@media (max-width: 1200px) {
+  .permits-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.clock-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+}
+
+.clock-row input,
+.form input {
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.form-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.form-label {
+  min-width: 64px;
+  color: #475569;
+  font-size: 12px;
+}
+
+.form .purpose {
+  flex: 1;
+  min-width: 180px;
+}
+
+label.inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.badge {
+  display: inline-block;
+  font-style: normal;
+  font-size: 11px;
+  border-radius: 4px;
+  padding: 1px 6px;
+  border: 1px solid #cbd5e1;
+  color: #475569;
+  background: #f1f5f9;
+}
+
+.badge-draft {
+  border-color: #a5b4fc;
+  color: #3730a3;
+  background: #eef2ff;
+}
+
+.badge-active,
+.badge-applicable {
+  border-color: #6ee7b7;
+  color: #065f46;
+  background: #ecfdf5;
+}
+
+.badge-expired {
+  border-color: #fca5a5;
+  color: #991b1b;
+  background: #fef2f2;
+}
+
+.badge-revoked {
+  border-color: #d6d3d1;
+  color: #57534e;
+  background: #f5f5f4;
+}
+
+.badge-plan-current {
+  border-color: #6ee7b7;
+  color: #065f46;
+  background: #ecfdf5;
+}
+
+.badge-plan-stale {
+  border-color: #fcd34d;
+  color: #92400e;
+  background: #fffbeb;
+}
+
+.badge-plan-expired {
+  border-color: #fca5a5;
+  color: #991b1b;
+  background: #fef2f2;
+}
+
+.permit-list,
+.plan-list {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0 0;
+}
+
+.permit-list > li,
+.plan-list > li {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+}
+
+.permit-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.permit-window {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.permit-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.permit-actions button {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.check {
+  font-size: 11px;
+  border-radius: 4px;
+  padding: 1px 6px;
+  background: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #6ee7b7;
+}
+
+.check-bad {
+  background: #fef2f2;
+  color: #991b1b;
+  border-color: #fca5a5;
+}
+
+.events {
+  margin-top: 8px;
+}
+
+.events table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.events th,
+.events td {
+  border: 1px solid #e2e8f0;
+  padding: 3px 6px;
+  text-align: left;
+}
+
+.events .hash {
+  font-family: monospace;
+  color: #64748b;
+}
+
+.chain-bad {
+  color: #991b1b;
+}
+
+.permit-banner {
+  background: #ecfdf5;
+  border: 1px solid #6ee7b7;
+  color: #065f46;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.snapshot-banner {
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  color: #92400e;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.snapshot-banner button {
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.permit-tag {
+  font-style: normal;
+  font-size: 11px;
+  color: #065f46;
+  border: 1px solid #6ee7b7;
+  border-radius: 4px;
+  padding: 0 4px;
+  margin-left: 4px;
+}
+
+.disclaimer-small {
+  border-top: 1px dashed #e2e8f0;
+  padding-top: 8px;
+  margin-top: 12px;
+  color: #92400e;
+}
+
+.sw.permit {
+  background: #34d399;
+  border-top: 2px dashed #34d399;
+  height: 0;
+}

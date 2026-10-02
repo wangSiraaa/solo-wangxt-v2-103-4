@@ -186,6 +186,16 @@ export class NetworkGraphComponent implements AfterViewInit, OnChanges, OnDestro
           },
         },
         {
+          selector: 'edge.permit',
+          style: {
+            'line-color': '#34d399',
+            'target-arrow-color': '#34d399',
+            width: 5,
+            'line-style': 'dashed',
+            'line-dash-pattern': [8, 4],
+          },
+        },
+        {
           selector: 'node.onpath',
           style: { 'border-color': '#67e8f9', 'border-width': 3 },
         },
@@ -214,6 +224,14 @@ export class NetworkGraphComponent implements AfterViewInit, OnChanges, OnDestro
 
     // 目标设备
     cy.$(`node#${result.target_id}`).addClass('hl-target');
+
+    // 临时旁路许可启用的旁路阀门（模拟，绿色虚线）
+    for (const vid of result.permit_valves ?? []) {
+      const eid = edgeByValve.get(vid);
+      if (eid) {
+        cy.$(`edge#${eid}`).addClass('permit');
+      }
+    }
 
     if (result.feasible && result.solutions.length) {
       const best = result.solutions[0];
